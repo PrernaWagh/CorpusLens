@@ -1,0 +1,25 @@
+# Compiled files
+*.o
+*.out
+*.exe
+
+# Build folders
+build/
+cmake-build-*/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE files
+.vscode/
+
+# Temporary files
+*.tmp
+*.log
+
+# Generated benchmark results
+results/*.csv
+
+# Large generated corpus files
+data/generated/
