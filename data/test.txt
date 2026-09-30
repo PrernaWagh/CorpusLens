@@ -1,0 +1,4 @@
+Parallel programming is useful for processing large data.
+Parallel programming can reduce processing time.
+Large data requires efficient algorithms.
+Efficient algorithms are important for large systems.
