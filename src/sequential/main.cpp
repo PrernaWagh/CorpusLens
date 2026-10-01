@@ -2,85 +2,82 @@
 #include <fstream>
 #include <string>
 #include <vector>
-#include <unordered_map>
-#include <chrono>
 
 #include "../common/tokenizer.h"
-
-using namespace std;
+#include "../common/frequency_analyzer.h"
+#include "../common/statistics.h"
 
 int main() {
 
-    string filename = "data/test.txt";
+    const std::string filename = "data/test.txt";
 
-    long long totalWords = 0;
-    long long totalCharacters = 0;
-    long long totalLines = 0;
-    long long totalSentences = 0;
-
-    ifstream file(filename);
+    std::ifstream file(filename);
 
     if (!file.is_open()) {
-        cerr << "Error: Could not open file." << endl;
+        std::cerr << "Error: Could not open corpus.\n";
         return 1;
     }
 
-    unordered_map<string, long long> frequency;
+    std::vector<std::string> allTokens;
 
-    string line;
+    CorpusStatistics stats;
 
-    // Start timer
-    auto start = chrono::high_resolution_clock::now();
+    std::string line;
 
-    while (getline(file, line)) {
+    while (std::getline(file, line)) {
 
-        vector<string> words = tokenize(line);
+        ++stats.totalLines;
 
-        totalLines++;
-
-        totalCharacters += line.length();
-
-        totalWords += words.size();
-
-        for (const string& word : words) {
-            frequency[word]++;
-        }
+        stats.totalCharacters += line.length();
 
         for (char ch : line) {
             if (ch == '.' || ch == '?' || ch == '!') {
-                totalSentences++;
+                ++stats.totalSentences;
             }
         }
-    }
 
-    // Stop timer
-    auto end = chrono::high_resolution_clock::now();
+        std::vector<std::string> tokens = tokenize(line);
+
+        stats.totalWords += tokens.size();
+
+        allTokens.insert(
+            allTokens.end(),
+            tokens.begin(),
+            tokens.end()
+        );
+    }
 
     file.close();
 
-    // Calculate execution time
-    double executionTime =
-        chrono::duration<double>(end - start).count();
+    FrequencyMap frequency =
+        countWordFrequency(allTokens);
 
-    cout << "\n========== CORPUS STATISTICS ==========\n";
+    stats.uniqueWords = frequency.size();
 
-    cout << "Total lines       : " << totalLines << endl;
-    cout << "Total words       : " << totalWords << endl;
-    cout << "Unique words      : " << frequency.size() << endl;
-    cout << "Total characters  : " << totalCharacters << endl;
-    cout << "Total sentences   : " << totalSentences << endl;
+    std::cout << "\n========== CORPUS STATISTICS ==========\n";
 
-    cout << "Execution time    : "
-         << executionTime
-         << " seconds" << endl;
+    std::cout << "Total lines      : "
+              << stats.totalLines << '\n';
 
-    cout << "\nWord Frequencies:\n";
+    std::cout << "Total words      : "
+              << stats.totalWords << '\n';
+
+    std::cout << "Unique words     : "
+              << stats.uniqueWords << '\n';
+
+    std::cout << "Total characters : "
+              << stats.totalCharacters << '\n';
+
+    std::cout << "Total sentences  : "
+              << stats.totalSentences << '\n';
+
+    std::cout << "\n========== WORD FREQUENCIES ==========\n";
 
     for (const auto& entry : frequency) {
-        cout << entry.first
-             << " : "
-             << entry.second
-             << endl;
+        std::cout << entry.first
+                  << " : "
+                  << entry.second
+                  << '\n';
     }
 
     return 0;
