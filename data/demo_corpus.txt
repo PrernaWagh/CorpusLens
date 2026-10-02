@@ -1,0 +1,10 @@
+Corpus analysis is an important part of natural language processing.
+A corpus contains collections of text that can be analyzed using computational methods.
+CorpusLens measures words, sentences, paragraphs, characters, and word frequencies.
+Parallel processing can reduce execution time when large text collections are analyzed.
+OpenMP allows programs to divide computational work across multiple threads.
+Multiple threads can process different parts of a corpus at the same time.
+Frequency analysis identifies the words that appear most often in the corpus.
+Statistics help researchers understand the structure and characteristics of text.
+Performance measurements allow us to compare sequential and parallel execution.
+CorpusLens demonstrates how parallel computing can be applied to text analysis.
