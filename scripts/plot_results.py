@@ -1,6 +1,3 @@
-
-#!/usr/bin/env python3
-
 import csv
 import os
 from collections import defaultdict
@@ -8,7 +5,7 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 
 
-INPUT_FILE = "results/scaling_results.csv"
+INPUT_FILE = "results/metrics.csv"
 
 OUTPUT_DIR = "results/plots"
 
@@ -18,16 +15,12 @@ os.makedirs(
 )
 
 
-# ============================================================
-# Read CSV
-# ============================================================
-
 data = defaultdict(list)
+
 
 with open(
     INPUT_FILE,
-    "r",
-    newline=""
+    "r"
 ) as file:
 
     reader = csv.DictReader(file)
@@ -36,364 +29,279 @@ with open(
 
         input_file = row["input_file"]
 
-        size_mb = float(
-            row["input_size_mb"]
-        )
+        data[input_file].append({
+            "threads":
+                int(row["threads"]),
 
-        threads = int(
-            row["threads"]
-        )
+            "time":
+                float(row["time_seconds"]),
 
-        time = float(
-            row["time_seconds"]
-        )
+            "speedup":
+                float(row["speedup"]),
 
-        data[
-            (input_file, size_mb, threads)
-        ].append(time)
+            "efficiency":
+                float(
+                    row["efficiency_percent"]
+                ),
 
-
-# ============================================================
-# Calculate average execution time
-# ============================================================
-
-averages = {}
-
-for key, values in data.items():
-
-    averages[key] = (
-        sum(values) / len(values)
-    )
+            "size":
+                row["input_size_mb"]
+        })
 
 
-# ============================================================
-# Save processed results
-# ============================================================
+# ==================================================
+# 1. Execution time vs threads
+# ==================================================
 
-processed_file = (
-    "results/processed_results.csv"
-)
+for input_file, rows in data.items():
 
-with open(
-    processed_file,
-    "w",
-    newline=""
-) as file:
-
-    writer = csv.writer(file)
-
-    writer.writerow([
-        "input_file",
-        "size_mb",
-        "threads",
-        "average_time_seconds",
-        "speedup",
-        "efficiency"
-    ])
-
-    # Group by input file
-
-    input_groups = defaultdict(dict)
-
-    for (
-        input_file,
-        size_mb,
-        threads
-    ), time in averages.items():
-
-        input_groups[
-            (input_file, size_mb)
-        ][threads] = time
-
-    for (
-        input_file,
-        size_mb
-    ), thread_data in sorted(
-        input_groups.items()
-    ):
-
-        if 1 not in thread_data:
-            continue
-
-        baseline = thread_data[1]
-
-        for threads, time in sorted(
-            thread_data.items()
-        ):
-
-            speedup = baseline / time
-
-            efficiency = speedup / threads
-
-            writer.writerow([
-                input_file,
-                size_mb,
-                threads,
-                f"{time:.6f}",
-                f"{speedup:.6f}",
-                f"{efficiency:.6f}"
-            ])
-
-
-# ============================================================
-# Graph 1: Execution time vs threads
-# ============================================================
-
-plt.figure()
-
-for (
-    input_file,
-    size_mb
-), thread_data in sorted(
-    input_groups.items()
-):
-
-    x = sorted(thread_data.keys())
-
-    y = [
-        thread_data[t]
-        for t in x
+    threads = [
+        row["threads"]
+        for row in rows
     ]
 
-    label = f"{size_mb:g} MB"
+    times = [
+        row["time"]
+        for row in rows
+    ]
+
+    plt.figure()
 
     plt.plot(
-        x,
-        y,
-        marker="o",
-        label=label
+        threads,
+        times,
+        marker="o"
     )
 
-plt.xlabel("Number of Threads")
-
-plt.ylabel(
-    "Average Execution Time (seconds)"
-)
-
-plt.title(
-    "Execution Time vs Number of Threads"
-)
-
-plt.xticks(
-    sorted(
-        set(
-            threads
-            for values in input_groups.values()
-            for threads in values
-        )
+    plt.xlabel(
+        "Number of Threads"
     )
-)
 
-plt.grid(True)
+    plt.ylabel(
+        "Execution Time (seconds)"
+    )
 
-plt.legend()
+    plt.title(
+        f"Execution Time vs Threads\n"
+        f"{input_file}"
+    )
 
-plt.savefig(
-    f"{OUTPUT_DIR}/execution_time_vs_threads.png",
-    dpi=300,
-    bbox_inches="tight"
-)
+    plt.xticks(threads)
 
-plt.close()
+    plt.grid(True)
+
+    safe_name = (
+        input_file
+        .replace("/", "_")
+        .replace(".txt", "")
+    )
+
+    plt.savefig(
+        f"{OUTPUT_DIR}/"
+        f"execution_time_{safe_name}.png",
+        dpi=300,
+        bbox_inches="tight"
+    )
+
+    plt.close()
 
 
-# ============================================================
-# Graph 2: Speedup vs threads
-# ============================================================
+# ==================================================
+# 2. Speedup vs threads
+# ==================================================
 
-plt.figure()
+for input_file, rows in data.items():
 
-for (
-    input_file,
-    size_mb
-), thread_data in sorted(
-    input_groups.items()
-):
+    threads = [
+        row["threads"]
+        for row in rows
+    ]
 
-    if 1 not in thread_data:
+    speedups = [
+        row["speedup"]
+        for row in rows
+    ]
+
+    plt.figure()
+
+    plt.plot(
+        threads,
+        speedups,
+        marker="o"
+    )
+
+    plt.xlabel(
+        "Number of Threads"
+    )
+
+    plt.ylabel(
+        "Speedup"
+    )
+
+    plt.title(
+        f"Speedup vs Threads\n"
+        f"{input_file}"
+    )
+
+    plt.xticks(threads)
+
+    plt.grid(True)
+
+    safe_name = (
+        input_file
+        .replace("/", "_")
+        .replace(".txt", "")
+    )
+
+    plt.savefig(
+        f"{OUTPUT_DIR}/"
+        f"speedup_{safe_name}.png",
+        dpi=300,
+        bbox_inches="tight"
+    )
+
+    plt.close()
+
+
+# ==================================================
+# 3. Efficiency vs threads
+# ==================================================
+
+for input_file, rows in data.items():
+
+    threads = [
+        row["threads"]
+        for row in rows
+    ]
+
+    efficiencies = [
+        row["efficiency"]
+        for row in rows
+    ]
+
+    plt.figure()
+
+    plt.plot(
+        threads,
+        efficiencies,
+        marker="o"
+    )
+
+    plt.xlabel(
+        "Number of Threads"
+    )
+
+    plt.ylabel(
+        "Efficiency (%)"
+    )
+
+    plt.title(
+        f"Parallel Efficiency vs Threads\n"
+        f"{input_file}"
+    )
+
+    plt.xticks(threads)
+
+    plt.grid(True)
+
+    safe_name = (
+        input_file
+        .replace("/", "_")
+        .replace(".txt", "")
+    )
+
+    plt.savefig(
+        f"{OUTPUT_DIR}/"
+        f"efficiency_{safe_name}.png",
+        dpi=300,
+        bbox_inches="tight"
+    )
+
+    plt.close()
+
+
+# ==================================================
+# 4. Execution time vs input size
+# ==================================================
+
+size_data = defaultdict(list)
+
+
+for input_file, rows in data.items():
+
+    if not rows:
         continue
 
-    baseline = thread_data[1]
+    size = rows[0]["size"]
 
-    x = sorted(thread_data.keys())
-
-    y = [
-        baseline / thread_data[t]
-        for t in x
-    ]
-
-    label = f"{size_mb:g} MB"
-
-    plt.plot(
-        x,
-        y,
-        marker="o",
-        label=label
-    )
-
-plt.xlabel("Number of Threads")
-
-plt.ylabel("Speedup")
-
-plt.title(
-    "Speedup vs Number of Threads"
-)
-
-plt.grid(True)
-
-plt.legend()
-
-plt.savefig(
-    f"{OUTPUT_DIR}/speedup_vs_threads.png",
-    dpi=300,
-    bbox_inches="tight"
-)
-
-plt.close()
-
-
-# ============================================================
-# Graph 3: Efficiency vs threads
-# ============================================================
-
-plt.figure()
-
-for (
-    input_file,
-    size_mb
-), thread_data in sorted(
-    input_groups.items()
-):
-
-    if 1 not in thread_data:
+    if size == "test":
         continue
 
-    baseline = thread_data[1]
+    size = float(size)
 
-    x = sorted(thread_data.keys())
+    for row in rows:
 
-    y = [
-        (baseline / thread_data[t]) / t
-        for t in x
-    ]
+        size_data[row["threads"]].append({
+            "size": size,
+            "time": row["time"]
+        })
 
-    label = f"{size_mb:g} MB"
 
-    plt.plot(
-        x,
-        y,
-        marker="o",
-        label=label
+for threads, rows in size_data.items():
+
+    rows.sort(
+        key=lambda x: x["size"]
     )
 
-plt.xlabel("Number of Threads")
-
-plt.ylabel("Parallel Efficiency")
-
-plt.title(
-    "Parallel Efficiency vs Number of Threads"
-)
-
-plt.grid(True)
-
-plt.legend()
-
-plt.savefig(
-    f"{OUTPUT_DIR}/efficiency_vs_threads.png",
-    dpi=300,
-    bbox_inches="tight"
-)
-
-plt.close()
-
-
-# ============================================================
-# Graph 4: Execution time vs input size
-# ============================================================
-
-plt.figure()
-
-size_groups = defaultdict(dict)
-
-for (
-    input_file,
-    size_mb
-), thread_data in input_groups.items():
-
-    for threads, time in thread_data.items():
-
-        size_groups[threads][
-            size_mb
-        ] = time
-
-
-for threads, values in sorted(
-    size_groups.items()
-):
-
-    x = sorted(values.keys())
-
-    y = [
-        values[size]
-        for size in x
+    sizes = [
+        row["size"]
+        for row in rows
     ]
 
+    times = [
+        row["time"]
+        for row in rows
+    ]
+
+    plt.figure()
+
     plt.plot(
-        x,
-        y,
-        marker="o",
-        label=f"{threads} threads"
+        sizes,
+        times,
+        marker="o"
     )
 
-plt.xlabel(
-    "Input Size (MB)"
-)
+    plt.xlabel(
+        "Input Size (MB)"
+    )
 
-plt.ylabel(
-    "Average Execution Time (seconds)"
-)
+    plt.ylabel(
+        "Execution Time (seconds)"
+    )
 
-plt.title(
-    "Execution Time vs Input Size"
-)
+    plt.title(
+        f"Execution Time vs Input Size "
+        f"({threads} threads)"
+    )
 
-plt.grid(True)
+    plt.grid(True)
 
-plt.legend()
+    plt.savefig(
+        f"{OUTPUT_DIR}/"
+        f"execution_time_vs_size_"
+        f"{threads}_threads.png",
+        dpi=300,
+        bbox_inches="tight"
+    )
 
-plt.savefig(
-    f"{OUTPUT_DIR}/execution_time_vs_input_size.png",
-    dpi=300,
-    bbox_inches="tight"
-)
+    plt.close()
 
-plt.close()
-
-
-print()
-print("========================================")
-print("       ANALYSIS COMPLETED")
-print("========================================")
-
-print()
-print("Processed data:")
-print(processed_file)
-
-print()
-print("Graphs:")
 
 print(
-    f"{OUTPUT_DIR}/execution_time_vs_threads.png"
+    "All graphs generated successfully."
 )
 
 print(
-    f"{OUTPUT_DIR}/speedup_vs_threads.png"
-)
-
-print(
-    f"{OUTPUT_DIR}/efficiency_vs_threads.png"
-)
-
-print(
-    f"{OUTPUT_DIR}/execution_time_vs_input_size.png"
+    "Graphs saved in:",
+    OUTPUT_DIR
 )
