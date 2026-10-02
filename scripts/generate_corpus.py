@@ -1,44 +1,43 @@
-
-#!/usr/bin/env python3
-
 import random
 import sys
 from pathlib import Path
 
 
 WORDS = [
-    "algorithm",
-    "analysis",
-    "application",
-    "array",
-    "computation",
-    "computer",
-    "corpus",
-    "data",
-    "efficient",
-    "frequency",
-    "memory",
     "parallel",
-    "performance",
-    "program",
-    "processing",
-    "search",
-    "software",
+    "programming",
+    "algorithm",
+    "data",
     "structure",
+    "efficient",
+    "processing",
+    "large",
+    "corpus",
     "system",
+    "performance",
     "thread",
-    "token",
-    "word",
+    "memory",
+    "computation",
+    "analysis",
+    "software",
     "optimization",
+    "search",
+    "frequency",
+    "token",
+    "openmp",
+    "computer",
+    "science",
     "execution",
-    "time",
+    "runtime",
+    "processor",
+    "workload",
+    "scalability",
+    "benchmark",
+    "implementation",
 ]
 
 
 def generate_corpus(output_file, target_size_mb):
-    """
-    Generate a text corpus approximately target_size_mb MB in size.
-    """
 
     target_bytes = target_size_mb * 1024 * 1024
 
@@ -48,8 +47,6 @@ def generate_corpus(output_file, target_size_mb):
         parents=True,
         exist_ok=True
     )
-
-    random.seed(42)
 
     written_bytes = 0
 
@@ -71,7 +68,9 @@ def generate_corpus(output_file, target_size_mb):
                 for _ in range(sentence_length)
             ]
 
-            sentence = " ".join(words) + ".\n"
+            sentence = " ".join(words)
+
+            sentence += ".\n"
 
             file.write(sentence)
 
@@ -82,20 +81,20 @@ def generate_corpus(output_file, target_size_mb):
     actual_size = output_path.stat().st_size
 
     print(
-        f"Generated: {output_file}"
+        f"Created: {output_file}"
     )
 
     print(
-        f"Target size : {target_size_mb} MB"
+        f"Target: {target_size_mb} MB"
     )
 
     print(
-        f"Actual size : "
+        f"Actual: "
         f"{actual_size / (1024 * 1024):.2f} MB"
     )
 
 
-def main():
+if __name__ == "__main__":
 
     if len(sys.argv) != 3:
 
@@ -104,34 +103,20 @@ def main():
         )
 
         print(
-            "python3 scripts/generate_corpus.py "
+            "python3 "
+            "scripts/generate_corpus.py "
             "<output_file> <size_mb>"
-        )
-
-        print()
-
-        print("Example:")
-
-        print(
-            "python3 scripts/generate_corpus.py "
-            "data/corpus_50MB.txt 50"
         )
 
         sys.exit(1)
 
     output_file = sys.argv[1]
 
-    try:
-        size_mb = float(sys.argv[2])
-    except ValueError:
-
-        print("Error: size must be a number.")
-
-        sys.exit(1)
+    size_mb = int(sys.argv[2])
 
     if size_mb <= 0:
 
-        print("Error: size must be greater than zero.")
+        print("Size must be positive.")
 
         sys.exit(1)
 
@@ -139,8 +124,3 @@ def main():
         output_file,
         size_mb
     )
-
-
-if __name__ == "__main__":
-    main()
-
