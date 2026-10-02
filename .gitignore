@@ -1,27 +1,29 @@
-# Compiled files 
-*.o 
-*.out 
-*.exe 
+# Compiled files
+*.o
+*.out
+*.exe
 
-.venv/ 
+# Python virtual environment
+.venv/
 
-# Build folders 
-build/ 
-cmake-build-*/ 
- 
-# Python cache 
-__pycache__/ 
-*.pyc 
- 
-# IDE files 
-.vscode/ 
- 
-# Temporary files 
-*.tmp 
-*.log 
- 
-# Generated benchmark results 
-results/*.csv 
- 
-# Large generated corpus files 
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Build folders
+build/
+cmake-build-*/
+
+# IDE files
+.vscode/
+
+# Temporary files
+*.tmp
+*.log
+
+# Generated benchmark results
+results/*.csv
+
+# Generated / large corpus files
 data/
