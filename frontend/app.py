@@ -1,1373 +1,3 @@
-# import streamlit as st
-# import subprocess
-# import tempfile
-# import os
-# import re
-# from pathlib import Path
-# import pandas as pd
-
-
-# # ============================================================
-# # CONFIGURATION
-# # ============================================================
-
-# ROOT = Path(__file__).resolve().parent.parent
-
-# SEQUENTIAL = ROOT / "sequential"
-# PARALLEL = ROOT / "parallel"
-
-# # Fixed thread counts used for the performance experiment.
-# # The selected sidebar thread count is still used for the
-# # main corpus analysis.
-# BENCHMARK_THREADS = [1, 2, 4, 8]
-
-
-# # ============================================================
-# # PAGE CONFIGURATION
-# # ============================================================
-
-# st.set_page_config(
-#     page_title="CorpusLens",
-#     page_icon="📚",
-#     layout="wide",
-#     initial_sidebar_state="expanded"
-# )
-
-
-# # ============================================================
-# # SESSION STATE
-# # ============================================================
-
-# if "analysis_done" not in st.session_state:
-#     st.session_state.analysis_done = False
-
-# if "analysis_output" not in st.session_state:
-#     st.session_state.analysis_output = None
-
-# if "analysis_stats" not in st.session_state:
-#     st.session_state.analysis_stats = {}
-
-# if "analysis_top_words" not in st.session_state:
-#     st.session_state.analysis_top_words = []
-
-# if "benchmark_df" not in st.session_state:
-#     st.session_state.benchmark_df = pd.DataFrame()
-
-# if "benchmark_errors" not in st.session_state:
-#     st.session_state.benchmark_errors = []
-
-# if "uploaded_filename" not in st.session_state:
-#     st.session_state.uploaded_filename = None
-
-# if "uploaded_file_signature" not in st.session_state:
-#     st.session_state.uploaded_file_signature = None
-
-
-# # ============================================================
-# # HELPER FUNCTIONS
-# # ============================================================
-
-# def reset_results():
-#     """Clear all analysis results from session state."""
-
-#     st.session_state.analysis_done = False
-#     st.session_state.analysis_output = None
-#     st.session_state.analysis_stats = {}
-#     st.session_state.analysis_top_words = []
-#     st.session_state.benchmark_df = pd.DataFrame()
-#     st.session_state.benchmark_errors = []
-#     st.session_state.uploaded_filename = None
-
-
-# def parse_output(output):
-#     """
-#     Parse statistics and top-word information from C++ output.
-#     """
-
-#     stats = {}
-#     top_words = []
-
-#     patterns = {
-#         "total_lines": r"Total lines\s*:\s*([\d.]+)",
-#         "total_paragraphs": r"Total paragraphs\s*:\s*([\d.]+)",
-#         "total_words": r"Total words\s*:\s*([\d.]+)",
-#         "unique_words": r"Unique words\s*:\s*([\d.]+)",
-#         "total_characters": r"Total characters\s*:\s*([\d.]+)",
-#         "total_sentences": r"Total sentences\s*:\s*([\d.]+)",
-#         "avg_words_line": r"Average words/line\s*:\s*([\d.]+)",
-#         "avg_words_sentence": r"Average words/sentence\s*:\s*([\d.]+)",
-#         "avg_characters_line": r"Average characters/line\s*:\s*([\d.]+)",
-#         "threads": r"Threads\s*:\s*(\d+)",
-#         "execution_time": r"Execution time\s*:\s*([\d.]+)"
-#     }
-
-#     for key, pattern in patterns.items():
-
-#         match = re.search(pattern, output)
-
-#         if not match:
-#             continue
-
-#         value = match.group(1)
-
-#         if key in {
-#             "avg_words_line",
-#             "avg_words_sentence",
-#             "avg_characters_line",
-#             "execution_time"
-#         }:
-#             stats[key] = float(value)
-#         else:
-#             stats[key] = int(float(value))
-
-#     # --------------------------------------------------------
-#     # TOP WORDS
-#     # --------------------------------------------------------
-
-#     in_top_words = False
-
-#     for line in output.splitlines():
-
-#         if "TOP FREQUENT WORDS" in line:
-#             in_top_words = True
-#             continue
-
-#         if in_top_words:
-
-#             match = re.match(
-#                 r"\s*(\d+)\s+(\S+)\s+(\d+)",
-#                 line
-#             )
-
-#             if match:
-
-#                 top_words.append(
-#                     {
-#                         "Rank": int(match.group(1)),
-#                         "Word": match.group(2),
-#                         "Frequency": int(match.group(3))
-#                     }
-#                 )
-
-#     return stats, top_words
-
-
-# def run_engine(input_file, mode, threads=4):
-#     """
-#     Run the selected C++ executable.
-
-#     Sequential:
-#         ./sequential <file>
-
-#     Parallel:
-#         ./parallel <file> <threads>
-#     """
-
-#     try:
-
-#         if mode == "Sequential":
-
-#             executable = SEQUENTIAL
-
-#             command = [
-#                 str(SEQUENTIAL),
-#                 str(input_file)
-#             ]
-
-#         else:
-
-#             executable = PARALLEL
-
-#             command = [
-#                 str(PARALLEL),
-#                 str(input_file),
-#                 str(threads)
-#             ]
-
-#         if not executable.exists():
-
-#             return (
-#                 "ERROR:\n\n"
-#                 f"Executable not found: {executable}\n\n"
-#                 "Please compile the C++ project before running CorpusLens."
-#             )
-
-#         result = subprocess.run(
-#             command,
-#             capture_output=True,
-#             text=True,
-#             cwd=str(ROOT)
-#         )
-
-#         if result.returncode != 0:
-
-#             return (
-#                 "ERROR:\n\n"
-#                 f"Return code: {result.returncode}\n\n"
-#                 "STDERR:\n"
-#                 f"{result.stderr}\n\n"
-#                 "STDOUT:\n"
-#                 f"{result.stdout}"
-#             )
-
-#         return result.stdout
-
-#     except Exception as error:
-
-#         return f"ERROR: {error}"
-
-
-# def save_uploaded_file(uploaded_file):
-#     """
-#     Save the Streamlit uploaded file to a temporary file.
-#     """
-
-#     suffix = Path(uploaded_file.name).suffix
-
-#     if suffix == "":
-#         suffix = ".txt"
-
-#     temp_file = tempfile.NamedTemporaryFile(
-#         delete=False,
-#         suffix=suffix
-#     )
-
-#     temp_file.write(uploaded_file.getbuffer())
-#     temp_file.close()
-
-#     return Path(temp_file.name)
-
-
-# def benchmark_uploaded_file(input_file):
-#     """
-#     Run the performance experiment for the CURRENT uploaded corpus.
-
-#     Experiment:
-#         Sequential baseline
-#         Parallel: 1, 2, 4, 8 threads
-
-#     Returns:
-#         benchmark DataFrame
-#         benchmark error messages
-#     """
-
-#     results = []
-#     errors = []
-
-#     # ========================================================
-#     # SEQUENTIAL BASELINE
-#     # ========================================================
-
-#     sequential_output = run_engine(
-#         input_file,
-#         "Sequential"
-#     )
-
-#     if sequential_output.startswith("ERROR"):
-
-#         errors.append(
-#             "Sequential benchmark failed:\n"
-#             + sequential_output
-#         )
-
-#     else:
-
-#         sequential_stats, _ = parse_output(
-#             sequential_output
-#         )
-
-#         sequential_time = sequential_stats.get(
-#             "execution_time"
-#         )
-
-#         if sequential_time is not None:
-
-#             results.append(
-#                 {
-#                     "Mode": "Sequential",
-#                     "Threads": 1,
-#                     "Execution Time": sequential_time
-#                 }
-#             )
-
-#         else:
-
-#             errors.append(
-#                 "Sequential benchmark completed, "
-#                 "but execution time could not be parsed."
-#             )
-
-#     # ========================================================
-#     # PARALLEL THREAD SCALING
-#     # ========================================================
-
-#     for thread_count in BENCHMARK_THREADS:
-
-#         parallel_output = run_engine(
-#             input_file,
-#             "Parallel",
-#             thread_count
-#         )
-
-#         if parallel_output.startswith("ERROR"):
-
-#             errors.append(
-#                 f"Parallel benchmark failed "
-#                 f"for {thread_count} thread(s):\n"
-#                 f"{parallel_output}"
-#             )
-
-#             continue
-
-#         parallel_stats, _ = parse_output(
-#             parallel_output
-#         )
-
-#         parallel_time = parallel_stats.get(
-#             "execution_time"
-#         )
-
-#         if parallel_time is not None:
-
-#             results.append(
-#                 {
-#                     "Mode": "Parallel",
-#                     "Threads": thread_count,
-#                     "Execution Time": parallel_time
-#                 }
-#             )
-
-#         else:
-
-#             errors.append(
-#                 f"Parallel benchmark completed for "
-#                 f"{thread_count} thread(s), "
-#                 "but execution time could not be parsed."
-#             )
-
-#     return pd.DataFrame(results), errors
-
-
-# def build_performance_dataframe(benchmark_df):
-#     """
-#     Build the parallel performance DataFrame.
-
-#     Speedup:
-#         Sequential Time / Parallel Time
-
-#     Efficiency:
-#         Speedup / Threads * 100
-#     """
-
-#     if benchmark_df is None or benchmark_df.empty:
-#         return pd.DataFrame()
-
-#     df = benchmark_df.copy()
-
-#     # --------------------------------------------------------
-#     # Numeric conversion
-#     # --------------------------------------------------------
-
-#     df["Execution Time"] = pd.to_numeric(
-#         df["Execution Time"],
-#         errors="coerce"
-#     )
-
-#     df["Threads"] = pd.to_numeric(
-#         df["Threads"],
-#         errors="coerce"
-#     )
-
-#     df = df.dropna(
-#         subset=[
-#             "Execution Time",
-#             "Threads"
-#         ]
-#     )
-
-#     if df.empty:
-#         return pd.DataFrame()
-
-#     # --------------------------------------------------------
-#     # Sequential baseline
-#     # --------------------------------------------------------
-
-#     sequential_rows = df[
-#         df["Mode"] == "Sequential"
-#     ]
-
-#     if sequential_rows.empty:
-#         return pd.DataFrame()
-
-#     sequential_time = float(
-#         sequential_rows.iloc[0]["Execution Time"]
-#     )
-
-#     # A zero execution time cannot be used for speedup.
-#     if sequential_time <= 0:
-#         return pd.DataFrame()
-
-#     # --------------------------------------------------------
-#     # Parallel results
-#     # --------------------------------------------------------
-
-#     parallel_df = df[
-#         df["Mode"] == "Parallel"
-#     ].copy()
-
-#     if parallel_df.empty:
-#         return pd.DataFrame()
-
-#     parallel_df = parallel_df[
-#         parallel_df["Execution Time"] > 0
-#     ].copy()
-
-#     if parallel_df.empty:
-#         return pd.DataFrame()
-
-#     # --------------------------------------------------------
-#     # Speedup
-#     # --------------------------------------------------------
-
-#     parallel_df["Speedup"] = (
-#         sequential_time /
-#         parallel_df["Execution Time"]
-#     )
-
-#     # --------------------------------------------------------
-#     # Efficiency
-#     # --------------------------------------------------------
-
-#     parallel_df["Efficiency (%)"] = (
-#         parallel_df["Speedup"] /
-#         parallel_df["Threads"] *
-#         100
-#     )
-
-#     return parallel_df.sort_values(
-#         "Threads"
-#     ).reset_index(drop=True)
-
-
-# # ============================================================
-# # HEADER
-# # ============================================================
-
-# st.title("📚 CorpusLens")
-
-# st.markdown(
-#     """
-#     ### Corpus Analysis & Parallel Processing Dashboard
-
-#     Analyze a text corpus using **C++**, compare sequential and
-#     **OpenMP parallel processing**, and visualize performance.
-#     """
-# )
-
-# st.divider()
-
-
-# # ============================================================
-# # SIDEBAR
-# # ============================================================
-
-# st.sidebar.title("⚙️ CorpusLens Controls")
-
-# uploaded_file = st.sidebar.file_uploader(
-#     "Upload a text corpus",
-#     type=["txt"]
-# )
-
-# # ------------------------------------------------------------
-# # Detect a newly selected corpus
-# # ------------------------------------------------------------
-
-# if uploaded_file is not None:
-
-#     current_signature = (
-#         uploaded_file.name,
-#         uploaded_file.size
-#     )
-
-#     previous_signature = (
-#         st.session_state.uploaded_file_signature
-#     )
-
-#     if (
-#         previous_signature is not None
-#         and current_signature != previous_signature
-#     ):
-
-#         reset_results()
-
-#     st.session_state.uploaded_file_signature = (
-#         current_signature
-#     )
-
-# st.sidebar.divider()
-
-# mode = st.sidebar.radio(
-#     "Execution Mode",
-#     ["Parallel", "Sequential"]
-# )
-
-# threads = 4
-
-# if mode == "Parallel":
-
-#     threads = st.sidebar.slider(
-#         "Number of Threads",
-#         min_value=1,
-#         max_value=16,
-#         value=4,
-#         step=1
-#     )
-
-# st.sidebar.caption(
-#     "Performance benchmarking always uses "
-#     "1, 2, 4 and 8 threads."
-# )
-
-# st.sidebar.divider()
-
-# run_analysis = st.sidebar.button(
-#     "▶ Run Corpus Analysis",
-#     type="primary",
-#     width="stretch"
-# )
-
-# clear_results = st.sidebar.button(
-#     "🗑 Clear Results",
-#     width="stretch"
-# )
-
-# if clear_results:
-
-#     reset_results()
-
-#     st.session_state.uploaded_file_signature = None
-
-#     st.rerun()
-
-
-# # ============================================================
-# # NO FILE
-# # ============================================================
-
-# if uploaded_file is None:
-
-#     st.info(
-#         "👈 Upload a `.txt` corpus from the sidebar to begin."
-#     )
-
-#     st.subheader("What CorpusLens provides")
-
-#     info1, info2, info3 = st.columns(3)
-
-#     with info1:
-
-#         st.markdown(
-#             """
-#             ### 📊 Corpus Analysis
-
-#             - Total lines
-#             - Total paragraphs
-#             - Total words
-#             - Unique words
-#             - Characters
-#             - Sentences
-#             - Average values
-#             """
-#         )
-
-#     with info2:
-
-#         st.markdown(
-#             """
-#             ### 🔝 Frequency Analysis
-
-#             - Top frequent words
-#             - Word frequency table
-#             - Frequency visualization
-#             - CSV export
-#             """
-#         )
-
-#     with info3:
-
-#         st.markdown(
-#             """
-#             ### 🚀 Performance
-
-#             - Sequential baseline
-#             - OpenMP parallel execution
-#             - Speedup
-#             - Efficiency
-#             - Thread scaling
-#             - CSV export
-#             """
-#         )
-
-#     st.stop()
-
-
-# # ============================================================
-# # FILE INFORMATION
-# # ============================================================
-
-# file_size_mb = (
-#     uploaded_file.size /
-#     (1024 * 1024)
-# )
-
-# st.success(
-#     f"Corpus loaded: **{uploaded_file.name}**"
-# )
-
-# f1, f2, f3 = st.columns(3)
-
-# f1.metric(
-#     "📄 File",
-#     uploaded_file.name
-# )
-
-# f2.metric(
-#     "💾 File Size",
-#     f"{file_size_mb:.2f} MB"
-# )
-
-# f3.metric(
-#     "⚙️ Mode",
-#     mode
-# )
-
-
-# # ============================================================
-# # RUN ANALYSIS
-# # ============================================================
-
-# if run_analysis:
-
-#     temp_path = None
-
-#     try:
-
-#         temp_path = save_uploaded_file(
-#             uploaded_file
-#         )
-
-#         # ====================================================
-#         # MAIN SELECTED ANALYSIS
-#         # ====================================================
-
-#         with st.spinner(
-#             f"Running {mode.lower()} corpus analysis..."
-#         ):
-
-#             output = run_engine(
-#                 temp_path,
-#                 mode,
-#                 threads
-#             )
-
-#         if output.startswith("ERROR"):
-
-#             st.error(
-#                 "The CorpusLens C++ engine returned an error."
-#             )
-
-#             st.code(
-#                 output,
-#                 language="text"
-#             )
-
-#             st.stop()
-
-#         stats, top_words = parse_output(
-#             output
-#         )
-
-#         # ----------------------------------------------------
-#         # Save main analysis
-#         # ----------------------------------------------------
-
-#         st.session_state.analysis_done = True
-#         st.session_state.analysis_output = output
-#         st.session_state.analysis_stats = stats
-#         st.session_state.analysis_top_words = top_words
-#         st.session_state.uploaded_filename = uploaded_file.name
-
-#         # ====================================================
-#         # PERFORMANCE BENCHMARK
-#         # ====================================================
-
-#         with st.spinner(
-#             "Measuring sequential baseline and parallel thread scaling..."
-#         ):
-
-#             benchmark_df, benchmark_errors = (
-#                 benchmark_uploaded_file(
-#                     temp_path
-#                 )
-#             )
-
-#         st.session_state.benchmark_df = benchmark_df
-#         st.session_state.benchmark_errors = benchmark_errors
-
-#     finally:
-
-#         if temp_path is not None:
-
-#             try:
-#                 os.unlink(temp_path)
-#             except Exception:
-#                 pass
-
-
-# # ============================================================
-# # DISPLAY RESULTS
-# # ============================================================
-
-# if st.session_state.analysis_done:
-
-#     stats = st.session_state.analysis_stats
-
-#     top_words = (
-#         st.session_state.analysis_top_words
-#     )
-
-#     benchmark_df = (
-#         st.session_state.benchmark_df
-#     )
-
-#     benchmark_errors = (
-#         st.session_state.benchmark_errors
-#     )
-
-#     # ========================================================
-#     # TABS
-#     # ========================================================
-
-#     tab1, tab2, tab3 = st.tabs(
-#         [
-#             "📊 Corpus Analysis",
-#             "🔝 Word Frequency",
-#             "🚀 Performance"
-#         ]
-#     )
-
-#     # ========================================================
-#     # TAB 1 — CORPUS ANALYSIS
-#     # ========================================================
-
-#     with tab1:
-
-#         st.header("📊 Corpus Statistics")
-
-#         st.caption(
-#             f"Analysis results for "
-#             f"**{st.session_state.uploaded_filename}**"
-#         )
-
-#         # ----------------------------------------------------
-#         # MAIN METRICS
-#         # ----------------------------------------------------
-
-#         c1, c2, c3, c4 = st.columns(4)
-
-#         c1.metric(
-#             "Total Lines",
-#             f"{stats.get('total_lines', 0):,}"
-#         )
-
-#         c2.metric(
-#             "Total Paragraphs",
-#             f"{stats.get('total_paragraphs', 0):,}"
-#         )
-
-#         c3.metric(
-#             "Total Words",
-#             f"{stats.get('total_words', 0):,}"
-#         )
-
-#         c4.metric(
-#             "Unique Words",
-#             f"{stats.get('unique_words', 0):,}"
-#         )
-
-#         c5, c6, c7, c8 = st.columns(4)
-
-#         c5.metric(
-#             "Characters",
-#             f"{stats.get('total_characters', 0):,}"
-#         )
-
-#         c6.metric(
-#             "Sentences",
-#             f"{stats.get('total_sentences', 0):,}"
-#         )
-
-#         c7.metric(
-#             "Words / Line",
-#             f"{stats.get('avg_words_line', 0):.2f}"
-#         )
-
-#         c8.metric(
-#             "Words / Sentence",
-#             f"{stats.get('avg_words_sentence', 0):.2f}"
-#         )
-
-#         st.divider()
-
-#         # ----------------------------------------------------
-#         # ADDITIONAL STATISTICS
-#         # ----------------------------------------------------
-
-#         st.subheader("📐 Derived Statistics")
-
-#         additional_stats = pd.DataFrame(
-#             {
-#                 "Metric": [
-#                     "Average words per line",
-#                     "Average words per sentence",
-#                     "Average characters per line"
-#                 ],
-#                 "Value": [
-#                     stats.get(
-#                         "avg_words_line",
-#                         0
-#                     ),
-#                     stats.get(
-#                         "avg_words_sentence",
-#                         0
-#                     ),
-#                     stats.get(
-#                         "avg_characters_line",
-#                         0
-#                     )
-#                 ]
-#             }
-#         )
-
-#         st.dataframe(
-#             additional_stats,
-#             width="stretch",
-#             hide_index=True
-#         )
-
-#         st.divider()
-
-#         # ----------------------------------------------------
-#         # SELECTED EXECUTION
-#         # ----------------------------------------------------
-
-#         st.subheader("⚡ Selected Execution")
-
-#         execution_time = stats.get(
-#             "execution_time"
-#         )
-
-#         e1, e2 = st.columns(2)
-
-#         if execution_time is not None:
-
-#             e1.metric(
-#                 "Execution Time",
-#                 f"{execution_time:.6f} s"
-#             )
-
-#         if mode == "Parallel":
-
-#             e2.metric(
-#                 "Threads Used",
-#                 stats.get(
-#                     "threads",
-#                     threads
-#                 )
-#             )
-
-#         else:
-
-#             e2.metric(
-#                 "Execution Type",
-#                 "Sequential"
-#             )
-
-
-#     # ========================================================
-#     # TAB 2 — WORD FREQUENCY
-#     # ========================================================
-
-#     with tab2:
-
-#         st.header("🔝 Word Frequency Analysis")
-
-#         st.caption(
-#             f"Top frequent words from "
-#             f"**{st.session_state.uploaded_filename}**."
-#         )
-
-#         if top_words:
-
-#             top_df = pd.DataFrame(
-#                 top_words
-#             )
-
-#             left, right = st.columns(
-#                 [1, 1]
-#             )
-
-#             with left:
-
-#                 st.subheader(
-#                     "Top Frequent Words"
-#                 )
-
-#                 st.dataframe(
-#                     top_df,
-#                     width="stretch",
-#                     hide_index=True
-#                 )
-
-#             with right:
-
-#                 st.subheader(
-#                     "Frequency Distribution"
-#                 )
-
-#                 chart_data = (
-#                     top_df
-#                     .set_index("Word")[
-#                         "Frequency"
-#                     ]
-#                 )
-
-#                 st.bar_chart(
-#                     chart_data,
-#                     width="stretch"
-#                 )
-
-#             st.download_button(
-#                 "⬇ Download Word Frequencies",
-#                 data=top_df.to_csv(
-#                     index=False
-#                 ),
-#                 file_name="corpuslens_top_words.csv",
-#                 mime="text/csv",
-#                 width="stretch"
-#             )
-
-#         else:
-
-#             st.info(
-#                 "No top-word information was returned "
-#                 "by the C++ engine."
-#             )
-
-
-#     # ========================================================
-#     # TAB 3 — PERFORMANCE
-#     # ========================================================
-
-#     with tab3:
-
-#         st.header(
-#             "🚀 Uploaded Corpus Performance"
-#         )
-
-#         st.caption(
-#             f"Performance results for "
-#             f"**{st.session_state.uploaded_filename}**."
-#         )
-
-#         st.info(
-#             "The sequential result is used as the baseline "
-#             "for calculating parallel speedup. The parallel "
-#             "scaling experiment measures 1, 2, 4 and 8 threads."
-#         )
-
-#         # ----------------------------------------------------
-#         # BENCHMARK ERRORS
-#         # ----------------------------------------------------
-
-#         if benchmark_errors:
-
-#             with st.expander(
-#                 "⚠️ Benchmark diagnostics"
-#             ):
-
-#                 for error in benchmark_errors:
-
-#                     st.warning(
-#                         error
-#                     )
-
-#         # ----------------------------------------------------
-#         # NO BENCHMARK DATA
-#         # ----------------------------------------------------
-
-#         if benchmark_df.empty:
-
-#             st.warning(
-#                 "No benchmark results are available."
-#             )
-
-#             st.info(
-#                 "For meaningful timing results, use a "
-#                 "reasonably large corpus such as test.txt."
-#             )
-
-#         else:
-
-#             performance_df = (
-#                 build_performance_dataframe(
-#                     benchmark_df
-#                 )
-#             )
-
-#             sequential_rows = benchmark_df[
-#                 benchmark_df["Mode"] == "Sequential"
-#             ]
-
-#             # =================================================
-#             # VALID PERFORMANCE DATA
-#             # =================================================
-
-#             if (
-#                 not sequential_rows.empty
-#                 and not performance_df.empty
-#             ):
-
-#                 sequential_time = float(
-#                     sequential_rows.iloc[0][
-#                         "Execution Time"
-#                     ]
-#                 )
-
-#                 # ------------------------------------------------
-#                 # FASTEST PARALLEL RESULT
-#                 # ------------------------------------------------
-
-#                 fastest_index = (
-#                     performance_df[
-#                         "Execution Time"
-#                     ].idxmin()
-#                 )
-
-#                 fastest_row = (
-#                     performance_df.loc[
-#                         fastest_index
-#                     ]
-#                 )
-
-#                 fastest_time = float(
-#                     fastest_row[
-#                         "Execution Time"
-#                     ]
-#                 )
-
-#                 fastest_threads = int(
-#                     fastest_row[
-#                         "Threads"
-#                     ]
-#                 )
-
-#                 fastest_speedup = float(
-#                     fastest_row[
-#                         "Speedup"
-#                     ]
-#                 )
-
-#                 # =================================================
-#                 # SUMMARY
-#                 # =================================================
-
-#                 st.subheader(
-#                     "🏁 Performance Summary"
-#                 )
-
-#                 p1, p2, p3, p4 = st.columns(4)
-
-#                 p1.metric(
-#                     "Sequential Baseline",
-#                     f"{sequential_time:.6f} s"
-#                 )
-
-#                 p2.metric(
-#                     "Fastest Parallel",
-#                     f"{fastest_time:.6f} s"
-#                 )
-
-#                 p3.metric(
-#                     "Best Thread Count",
-#                     fastest_threads
-#                 )
-
-#                 p4.metric(
-#                     "Maximum Speedup",
-#                     f"{fastest_speedup:.2f}×"
-#                 )
-
-#                 st.divider()
-
-#                 # =================================================
-#                 # BENCHMARK TABLE
-#                 # =================================================
-
-#                 st.subheader(
-#                     "⏱ Thread Benchmark"
-#                 )
-
-#                 display_df = benchmark_df.copy()
-
-#                 display_df[
-#                     "Execution Time"
-#                 ] = display_df[
-#                     "Execution Time"
-#                 ].map(
-#                     lambda x:
-#                     f"{x:.6f} s"
-#                 )
-
-#                 st.dataframe(
-#                     display_df,
-#                     width="stretch",
-#                     hide_index=True
-#                 )
-
-#                 st.caption(
-#                     "Sequential is the baseline. "
-#                     "Parallel results show thread scaling "
-#                     "for the current corpus."
-#                 )
-
-#                 # =================================================
-#                 # EXECUTION TIME GRAPH
-#                 # =================================================
-
-#                 st.subheader(
-#                     "📉 Execution Time vs Threads"
-#                 )
-
-#                 time_chart = (
-#                     performance_df[
-#                         [
-#                             "Threads",
-#                             "Execution Time"
-#                         ]
-#                     ]
-#                     .sort_values(
-#                         "Threads"
-#                     )
-#                     .set_index(
-#                         "Threads"
-#                     )
-#                 )
-
-#                 st.line_chart(
-#                     time_chart,
-#                     width="stretch"
-#                 )
-
-#                 st.caption(
-#                     "Lower execution time indicates faster processing."
-#                 )
-
-#                 # =================================================
-#                 # SPEEDUP GRAPH
-#                 # =================================================
-
-#                 st.subheader(
-#                     "📈 Speedup vs Threads"
-#                 )
-
-#                 speedup_chart = (
-#                     performance_df[
-#                         [
-#                             "Threads",
-#                             "Speedup"
-#                         ]
-#                     ]
-#                     .sort_values(
-#                         "Threads"
-#                     )
-#                     .set_index(
-#                         "Threads"
-#                     )
-#                 )
-
-#                 st.line_chart(
-#                     speedup_chart,
-#                     width="stretch"
-#                 )
-
-#                 st.caption(
-#                     "Speedup = Sequential Time / Parallel Time."
-#                 )
-
-#                 # =================================================
-#                 # EFFICIENCY GRAPH
-#                 # =================================================
-
-#                 st.subheader(
-#                     "📊 Parallel Efficiency vs Threads"
-#                 )
-
-#                 efficiency_chart = (
-#                     performance_df[
-#                         [
-#                             "Threads",
-#                             "Efficiency (%)"
-#                         ]
-#                     ]
-#                     .sort_values(
-#                         "Threads"
-#                     )
-#                     .set_index(
-#                         "Threads"
-#                     )
-#                 )
-
-#                 st.line_chart(
-#                     efficiency_chart,
-#                     width="stretch"
-#                 )
-
-#                 st.caption(
-#                     "Efficiency = Speedup / Number of Threads × 100."
-#                 )
-
-#                 # =================================================
-#                 # DETAILED METRICS
-#                 # =================================================
-
-#                 st.subheader(
-#                     "📋 Detailed Performance Metrics"
-#                 )
-
-#                 metrics_df = performance_df[
-#                     [
-#                         "Threads",
-#                         "Execution Time",
-#                         "Speedup",
-#                         "Efficiency (%)"
-#                     ]
-#                 ].copy()
-
-#                 metrics_df[
-#                     "Execution Time"
-#                 ] = metrics_df[
-#                     "Execution Time"
-#                 ].round(6)
-
-#                 metrics_df[
-#                     "Speedup"
-#                 ] = metrics_df[
-#                     "Speedup"
-#                 ].round(3)
-
-#                 metrics_df[
-#                     "Efficiency (%)"
-#                 ] = metrics_df[
-#                     "Efficiency (%)"
-#                 ].round(2)
-
-#                 st.dataframe(
-#                     metrics_df,
-#                     width="stretch",
-#                     hide_index=True
-#                 )
-
-#                 # =================================================
-#                 # DOWNLOAD
-#                 # =================================================
-
-#                 download_df = performance_df.copy()
-
-#                 st.download_button(
-#                     "⬇ Download Performance Results",
-#                     data=download_df.to_csv(
-#                         index=False
-#                     ),
-#                     file_name="corpuslens_performance.csv",
-#                     mime="text/csv",
-#                     width="stretch"
-#                 )
-
-#                 # =================================================
-#                 # INTERPRETATION
-#                 # =================================================
-
-#                 st.divider()
-
-#                 st.subheader(
-#                     "💡 Performance Interpretation"
-#                 )
-
-#                 st.markdown(
-#                     f"""
-#                     The uploaded corpus required
-#                     **{sequential_time:.6f} seconds**
-#                     using the sequential implementation.
-
-#                     The fastest measured parallel execution was
-#                     **{fastest_time:.6f} seconds**
-#                     using **{fastest_threads} threads**.
-
-#                     The measured speedup relative to the sequential
-#                     baseline was **{fastest_speedup:.2f}×**.
-
-#                     The benchmark shows how execution time,
-#                     speedup and parallel efficiency change as
-#                     the number of OpenMP threads increases.
-#                     """
-#                 )
-
-#             # =================================================
-#             # INSUFFICIENT TIMING DATA
-#             # =================================================
-
-#             else:
-
-#                 st.warning(
-#                     "The corpus was analyzed, but there is "
-#                     "insufficient timing data to calculate "
-#                     "speedup and efficiency."
-#                 )
-
-#                 st.info(
-#                     "This commonly happens with very small files "
-#                     "where execution time is measured as 0.00 seconds. "
-#                     "Try a larger corpus such as test.txt."
-#                 )
-
-#         # ====================================================
-#         # RAW C++ OUTPUT
-#         # ====================================================
-
-#         st.divider()
-
-#         with st.expander(
-#             "🔍 View Raw C++ Output"
-#         ):
-
-#             st.code(
-#                 st.session_state.analysis_output,
-#                 language="text"
-#             )
-
-
-# # ============================================================
-# # FOOTER
-# # ============================================================
-
-# st.divider()
-
-# st.caption(
-#     "CorpusLens • C++ Text Analysis • OpenMP Parallel Processing"
-# )
-
-
 import streamlit as st
 import subprocess
 import tempfile
@@ -1402,7 +32,7 @@ st.set_page_config(
 
 
 # ============================================================
-# GLOBAL STYLING  (Obsidian + Amber theme, no default blues)
+# GLOBAL STYLING
 # ============================================================
 
 def inject_theme():
@@ -1425,9 +55,6 @@ def inject_theme():
             --amber:       #e8a24a;
             --amber-soft:  #f0b96a;
             --copper:      #c9764a;
-            --sage:        #8fae87;
-            --plum:        #b184b6;
-            --danger:      #d97757;
         }
 
         /* ---------- base ---------- */
@@ -1435,7 +62,6 @@ def inject_theme():
             background: var(--obsidian-0) !important;
             color: var(--ink-100);
             font-family: 'Inter', -apple-system, sans-serif;
-            font-feature-settings: "cv02","cv03","cv04","cv11";
         }
 
         .stApp {
@@ -1445,14 +71,11 @@ def inject_theme():
                 var(--obsidian-0) !important;
         }
 
-        #MainMenu, footer, header[data-testid="stHeader"] {
-            background: transparent !important;
-            visibility: hidden;
-            height: 0;
-        }
+        /* DO NOT TOUCH header[data-testid="stHeader"] — Streamlit's
+           sidebar toggle lives inside it. Leave it fully intact. */
 
         .block-container {
-            padding-top: 1.4rem;
+            padding-top: 2rem;
             padding-bottom: 3rem;
             max-width: 1400px;
         }
@@ -1468,9 +91,7 @@ def inject_theme():
         h2 { font-size: 1.55rem !important; }
         h3 { font-size: 1.15rem !important; }
 
-        p, span, label, div {
-            color: var(--ink-200);
-        }
+        p, span, label, div { color: var(--ink-200); }
 
         code, pre, .stCode, [data-testid="stCode"] {
             font-family: 'JetBrains Mono', ui-monospace, monospace !important;
@@ -1483,9 +104,7 @@ def inject_theme():
             background: var(--obsidian-1) !important;
             border-right: 1px solid var(--hairline);
         }
-        section[data-testid="stSidebar"] > div {
-            padding-top: 1.2rem;
-        }
+        section[data-testid="stSidebar"] > div { padding-top: 1.2rem; }
         section[data-testid="stSidebar"] h1,
         section[data-testid="stSidebar"] h2,
         section[data-testid="stSidebar"] h3 {
@@ -1529,7 +148,6 @@ def inject_theme():
             font-weight: 500;
             font-size: 0.85rem;
         }
-        /* hide the radio dot itself */
         section[data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {
             display: none;
         }
@@ -1543,7 +161,6 @@ def inject_theme():
             padding: 0.55rem 1rem;
             font-weight: 500;
             font-family: 'Inter', sans-serif;
-            letter-spacing: 0.01em;
             transition: all 0.2s ease;
         }
         .stButton > button:hover {
@@ -1566,7 +183,6 @@ def inject_theme():
             box-shadow: 0 10px 24px -8px rgba(232,162,74,0.7);
         }
 
-        /* download button */
         .stDownloadButton > button {
             background: var(--obsidian-3);
             color: var(--ink-100);
@@ -1677,7 +293,6 @@ def inject_theme():
             padding: 9px 18px !important;
             font-weight: 500 !important;
             font-family: 'Inter', sans-serif !important;
-            letter-spacing: 0.01em;
             transition: all 0.2s ease;
         }
         button[data-baseweb="tab"]:hover {
@@ -1704,16 +319,13 @@ def inject_theme():
             font-size: 0.82rem !important;
         }
 
-        /* ---------- alerts / info ---------- */
+        /* ---------- alerts ---------- */
         div[data-testid="stAlert"] {
             background: var(--obsidian-2) !important;
             border: 1px solid var(--hairline-2) !important;
             border-left: 3px solid var(--amber) !important;
             border-radius: 12px !important;
             color: var(--ink-200) !important;
-        }
-        div[data-testid="stAlert"][data-baseweb="notification"] {
-            background: var(--obsidian-2) !important;
         }
         div[data-testid="stAlert"] svg { fill: var(--amber) !important; }
 
@@ -1974,7 +586,6 @@ def inject_theme():
             margin-bottom: 12px;
         }
 
-        /* fade-in for main blocks */
         @keyframes cl-fade {
             from { opacity: 0; transform: translateY(6px); }
             to   { opacity: 1; transform: translateY(0); }
@@ -1990,7 +601,7 @@ inject_theme()
 
 
 # ============================================================
-# SVG ICON LIBRARY (inline, no emoji)
+# SVG ICON LIBRARY
 # ============================================================
 
 ICON = {
@@ -2042,10 +653,23 @@ if "uploaded_filename" not in st.session_state:
 
 if "uploaded_file_signature" not in st.session_state:
     st.session_state.uploaded_file_signature = None
+if "analysis_mode" not in st.session_state:
+    st.session_state.analysis_mode = None
 
+if "correctness_done" not in st.session_state:
+    st.session_state.correctness_done = False
 
+if "correctness_passed" not in st.session_state:
+    st.session_state.correctness_passed = False
+
+if "correctness_details" not in st.session_state:
+    st.session_state.correctness_details = []
+
+if "correctness_error" not in st.session_state:
+    st.session_state.correctness_error = None
+    
 # ============================================================
-# HELPER FUNCTIONS  (unchanged backend)
+# HELPER FUNCTIONS
 # ============================================================
 
 def reset_results():
@@ -2053,10 +677,17 @@ def reset_results():
     st.session_state.analysis_output = None
     st.session_state.analysis_stats = {}
     st.session_state.analysis_top_words = []
+
     st.session_state.benchmark_df = pd.DataFrame()
     st.session_state.benchmark_errors = []
-    st.session_state.uploaded_filename = None
 
+    st.session_state.correctness_done = False
+    st.session_state.correctness_passed = False
+    st.session_state.correctness_details = []
+    st.session_state.correctness_error = None
+
+    st.session_state.uploaded_filename = None
+    st.session_state.analysis_mode = None
 
 def parse_output(output):
     stats = {}
@@ -2204,6 +835,124 @@ def benchmark_uploaded_file(input_file):
 
     return pd.DataFrame(results), errors
 
+def verify_correctness(input_file, thread_count):
+    """
+    Compare sequential and parallel results for the same input corpus.
+
+    Execution time and thread count are intentionally NOT compared.
+    We compare corpus statistics and Top-K frequencies.
+    """
+
+    sequential_output = run_engine(
+        input_file,
+        "Sequential"
+    )
+
+    if sequential_output.startswith("ERROR"):
+        return {
+            "passed": False,
+            "details": [],
+            "error": (
+                "Sequential execution failed:\n"
+                + sequential_output
+            )
+        }
+
+    parallel_output = run_engine(
+        input_file,
+        "Parallel",
+        thread_count
+    )
+
+    if parallel_output.startswith("ERROR"):
+        return {
+            "passed": False,
+            "details": [],
+            "error": (
+                "Parallel execution failed:\n"
+                + parallel_output
+            )
+        }
+
+    sequential_stats, sequential_top = parse_output(
+        sequential_output
+    )
+
+    parallel_stats, parallel_top = parse_output(
+        parallel_output
+    )
+
+    details = []
+
+    statistics_to_compare = [
+        ("Total lines", "total_lines"),
+        ("Total paragraphs", "total_paragraphs"),
+        ("Total words", "total_words"),
+        ("Unique words", "unique_words"),
+        ("Total characters", "total_characters"),
+        ("Total sentences", "total_sentences"),
+        ("Average words/line", "avg_words_line"),
+        ("Average words/sentence", "avg_words_sentence"),
+        ("Average characters/line", "avg_characters_line"),
+    ]
+
+    all_passed = True
+
+    for label, key in statistics_to_compare:
+
+        seq_value = sequential_stats.get(key)
+        par_value = parallel_stats.get(key)
+
+        passed = seq_value == par_value
+
+        if not passed:
+            all_passed = False
+
+        details.append({
+            "Check": label,
+            "Sequential": seq_value,
+            "Parallel": par_value,
+            "Status": "PASS" if passed else "FAIL"
+        })
+
+    # Compare Top-K
+    seq_top_normalized = [
+        (
+            item["Rank"],
+            item["Word"],
+            item["Frequency"]
+        )
+        for item in sequential_top
+    ]
+
+    par_top_normalized = [
+        (
+            item["Rank"],
+            item["Word"],
+            item["Frequency"]
+        )
+        for item in parallel_top
+    ]
+
+    top_k_passed = (
+        seq_top_normalized == par_top_normalized
+    )
+
+    if not top_k_passed:
+        all_passed = False
+
+    details.append({
+        "Check": "Top-K frequencies",
+        "Sequential": "Match" if top_k_passed else "Different",
+        "Parallel": "Match" if top_k_passed else "Different",
+        "Status": "PASS" if top_k_passed else "FAIL"
+    })
+
+    return {
+        "passed": all_passed,
+        "details": details,
+        "error": None
+    }
 
 def build_performance_dataframe(benchmark_df):
     if benchmark_df is None or benchmark_df.empty:
@@ -2242,7 +991,7 @@ def build_performance_dataframe(benchmark_df):
 
 
 # ============================================================
-# HEADER (custom hero)
+# HEADER
 # ============================================================
 
 st.markdown(
@@ -2345,13 +1094,26 @@ if mode == "Parallel":
         label_visibility="collapsed"
     )
 
-st.sidebar.caption("Performance benchmarking is always executed with 1, 2, 4 and 8 threads.")
+st.sidebar.caption(
+    "Performance benchmarking compares the sequential baseline "
+    "with OpenMP runs using 1, 2, 4 and 8 threads."
+)
 
 st.sidebar.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
 run_analysis = st.sidebar.button(
     "▶  Run Corpus Analysis",
     type="primary",
+    use_container_width=True
+)
+
+run_benchmark = st.sidebar.button(
+    "⚡ Run Performance Benchmark",
+    use_container_width=True
+)
+
+run_correctness = st.sidebar.button(
+    "✓ Run Correctness Check",
     use_container_width=True
 )
 
@@ -2484,48 +1246,189 @@ f1.metric("File Name", uploaded_file.name)
 f2.metric("File Size", f"{file_size_mb:.2f} MB")
 f3.metric("Active Mode", mode)
 
-
 # ============================================================
-# RUN ANALYSIS
+# RUN SELECTED CORPUS ANALYSIS
 # ============================================================
 
 if run_analysis:
 
-    temp_path = None
+    if uploaded_file is None:
 
-    try:
-        temp_path = save_uploaded_file(uploaded_file)
+        st.warning("Please upload a .txt corpus first.")
 
-        with st.spinner(f"Running {mode.lower()} corpus analysis..."):
-            output = run_engine(temp_path, mode, threads)
+    else:
 
-        if output.startswith("ERROR"):
-            st.error("The CorpusLens C++ engine returned an error.")
-            st.code(output, language="text")
-            st.stop()
+        temp_path = None
 
-        stats, top_words = parse_output(output)
+        try:
+            temp_path = save_uploaded_file(uploaded_file)
 
-        st.session_state.analysis_done = True
-        st.session_state.analysis_output = output
-        st.session_state.analysis_stats = stats
-        st.session_state.analysis_top_words = top_words
-        st.session_state.uploaded_filename = uploaded_file.name
+            with st.spinner(
+                f"Running {mode.lower()} corpus analysis..."
+            ):
+                output = run_engine(
+                    temp_path,
+                    mode,
+                    threads
+                )
 
-        with st.spinner("Measuring sequential baseline and parallel thread scaling..."):
-            benchmark_df, benchmark_errors = benchmark_uploaded_file(temp_path)
+            if output.startswith("ERROR"):
 
-        st.session_state.benchmark_df = benchmark_df
-        st.session_state.benchmark_errors = benchmark_errors
+                st.error(
+                    "The CorpusLens C++ engine returned an error."
+                )
 
-    finally:
-        if temp_path is not None:
-            try:
-                os.unlink(temp_path)
-            except Exception:
-                pass
+                st.code(
+                    output,
+                    language="text"
+                )
 
+            else:
 
+                stats, top_words = parse_output(output)
+
+                st.session_state.analysis_done = True
+
+                st.session_state.analysis_output = output
+
+                st.session_state.analysis_stats = stats
+
+                st.session_state.analysis_top_words = top_words
+
+                st.session_state.uploaded_filename = uploaded_file.name
+
+                st.session_state.analysis_mode = mode
+
+                # Clear old benchmark/correctness results because
+                # a new analysis has been performed.
+                st.session_state.benchmark_df = pd.DataFrame()
+
+                st.session_state.benchmark_errors = []
+
+                st.session_state.correctness_done = False
+                st.session_state.correctness_passed = False
+                st.session_state.correctness_details = []
+                st.session_state.correctness_error = None
+
+                st.success(
+                    f"{mode} analysis completed successfully."
+                )
+
+        finally:
+
+            if temp_path is not None:
+
+                try:
+                    os.unlink(temp_path)
+
+                except Exception:
+                    pass
+
+if run_benchmark:
+
+    if uploaded_file is None:
+
+        st.warning("Please upload a .txt corpus first.")
+
+    else:
+
+        temp_path = None
+
+        try:
+
+            temp_path = save_uploaded_file(uploaded_file)
+
+            with st.spinner(
+                "Running sequential baseline and OpenMP "
+                "thread-scaling benchmark..."
+            ):
+
+                benchmark_df, benchmark_errors = (
+                    benchmark_uploaded_file(temp_path)
+                )
+
+            st.session_state.benchmark_df = benchmark_df
+
+            st.session_state.benchmark_errors = benchmark_errors
+
+            st.session_state.uploaded_filename = uploaded_file.name
+
+            if benchmark_df.empty:
+
+                st.error(
+                    "No valid benchmark results were produced."
+                )
+
+            else:
+
+                st.success(
+                    "Performance benchmark completed successfully."
+                )
+
+        finally:
+
+            if temp_path is not None:
+
+                try:
+                    os.unlink(temp_path)
+
+                except Exception:
+                    pass
+
+# ============================================================
+# RUN CORRECTNESS CHECK
+# ============================================================
+
+if run_correctness:
+
+    if uploaded_file is None:
+
+        st.warning("Please upload a .txt corpus first.")
+
+    else:
+
+        temp_path = None
+
+        try:
+
+            temp_path = save_uploaded_file(uploaded_file)
+
+            with st.spinner(
+                "Comparing sequential and parallel results..."
+            ):
+
+                correctness_result = verify_correctness(
+                    temp_path,
+                    threads
+                )
+
+            st.session_state.correctness_done = True
+
+            st.session_state.correctness_passed = (
+                correctness_result["passed"]
+            )
+
+            st.session_state.correctness_details = (
+                correctness_result["details"]
+            )
+
+            st.session_state.correctness_error = (
+                correctness_result["error"]
+            )
+
+            st.session_state.uploaded_filename = (
+                uploaded_file.name
+            )
+
+        finally:
+
+            if temp_path is not None:
+
+                try:
+                    os.unlink(temp_path)
+
+                except Exception:
+                    pass
 # ============================================================
 # DISPLAY RESULTS
 # ============================================================
@@ -2537,17 +1440,14 @@ if st.session_state.analysis_done:
     benchmark_df = st.session_state.benchmark_df
     benchmark_errors = st.session_state.benchmark_errors
 
-    tab1, tab2, tab3 = st.tabs(
-        [
-            "  Corpus Analysis",
-            "  Word Frequency",
-            "  Performance"
-        ]
+    tab1, tab2, tab3, tab4 = st.tabs(
+    [
+        "  Corpus Analysis",
+        "  Word Frequency",
+        "  Performance",
+        "  Correctness"
+    ]
     )
-
-    # ========================================================
-    # TAB 1 — CORPUS ANALYSIS
-    # ========================================================
 
     with tab1:
 
@@ -2610,11 +1510,6 @@ if st.session_state.analysis_done:
         else:
             e2.metric("Execution Type", "Sequential")
 
-
-    # ========================================================
-    # TAB 2 — WORD FREQUENCY
-    # ========================================================
-
     with tab2:
 
         section_label("01", "Word Frequency Analysis")
@@ -2661,14 +1556,9 @@ if st.session_state.analysis_done:
         else:
             st.info("No top-word information was returned by the C++ engine.")
 
-
-    # ========================================================
-    # TAB 3 — PERFORMANCE
-    # ========================================================
-
     with tab3:
 
-        section_label("01", "Uploaded Corpus Performance")
+        section_label("01", "Performance Benchmark")
 
         st.caption(
             f"Performance results for **{st.session_state.uploaded_filename}**."
@@ -2855,6 +1745,115 @@ if st.session_state.analysis_done:
 
         st.divider()
 
+    with tab4:
+
+        section_label(
+            "01",
+            "Sequential vs Parallel Correctness"
+        )
+
+        st.caption(
+            f"Verification results for "
+            f"**{st.session_state.uploaded_filename}**."
+        )
+
+        st.info(
+            "The same corpus is processed by the sequential "
+            "and OpenMP parallel implementations. Statistical "
+            "results and Top-K frequencies are compared."
+        )
+
+        c1, c2, c3 = st.columns(3, gap="medium")
+
+        c1.metric(
+            "Input Corpus",
+            st.session_state.uploaded_filename
+        )
+
+        c2.metric(
+            "Parallel Threads",
+            threads
+        )
+
+        if st.session_state.correctness_done:
+
+            if st.session_state.correctness_passed:
+
+                c3.metric(
+                    "Result",
+                    "PASS"
+                )
+
+                st.success(
+                    "✓ Sequential and parallel implementations "
+                    "produced matching results."
+                )
+
+            else:
+
+                c3.metric(
+                    "Result",
+                    "FAIL"
+                )
+
+                st.error(
+                    "✗ Sequential and parallel results do not match."
+                )
+
+            if st.session_state.correctness_error:
+
+                st.error(
+                    st.session_state.correctness_error
+                )
+
+            if st.session_state.correctness_details:
+
+                st.divider()
+
+                section_label(
+                    "02",
+                    "Verification Details"
+                )
+
+                correctness_df = pd.DataFrame(
+                    st.session_state.correctness_details
+                )
+
+                st.dataframe(
+                    correctness_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+        else:
+
+            st.warning(
+                "Correctness verification has not been run yet."
+            )
+
+            st.markdown(
+                """
+                <div style="
+                    padding:20px;
+                    border:1px dashed rgba(232,162,74,0.30);
+                    border-radius:12px;
+                    margin-top:12px;
+                ">
+                    <strong>What will be checked?</strong>
+                    <ul>
+                        <li>Total lines</li>
+                        <li>Total paragraphs</li>
+                        <li>Total words</li>
+                        <li>Unique words</li>
+                        <li>Total characters</li>
+                        <li>Total sentences</li>
+                        <li>Average statistics</li>
+                        <li>Top-K frequencies</li>
+                    </ul>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
         with st.expander("View Raw C++ Output"):
             st.code(st.session_state.analysis_output, language="text")
 

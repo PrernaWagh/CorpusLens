@@ -10,9 +10,19 @@
 #include "../common/timer.h"
 #include "../common/result_printer.h"
 
-int main()
+int main(int argc, char* argv[])
 {
-    const std::string filename = "data/test.txt";
+    if (argc < 2) {
+
+        std::cerr
+            << "Usage: "
+            << argv[0]
+            << " <input_file>\n";
+
+        return 1;
+    }
+
+    const std::string filename = argv[1];
 
     const int K = 10;
 
