@@ -21,14 +21,9 @@ std::vector<WordFrequency> getTopK(
         return {};
     }
 
-    std::priority_queue<
-        WordFrequency,
-        std::vector<WordFrequency>,
-        CompareFrequency
-    > minHeap;
+    std::priority_queue<WordFrequency,std::vector<WordFrequency>,CompareFrequency> minHeap;
 
     for (const auto& entry : frequency) {
-
         WordFrequency current{
             entry.first,
             entry.second

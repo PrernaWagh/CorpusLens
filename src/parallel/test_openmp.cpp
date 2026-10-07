@@ -9,6 +9,5 @@ int main() {
                   << omp_get_thread_num()
                   << std::endl;
     }
-
     return 0;
 }

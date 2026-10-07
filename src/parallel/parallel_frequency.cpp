@@ -1,5 +1,4 @@
 #include "parallel_frequency.h"
-
 #include <omp.h>
 
 ParallelFrequencyMap countFrequencyParallel(
@@ -15,15 +14,8 @@ ParallelFrequencyMap countFrequencyParallel(
         int threadId = omp_get_thread_num();
 
         #pragma omp for
-        for (
-            int i = 0;
-            i < static_cast<int>(tokenChunks.size());
-            ++i
-        ) {
-            for (
-                const std::string& word :
-                tokenChunks[i]
-            ) {
+        for (int i = 0; i < static_cast<int>(tokenChunks.size()); ++i) {
+        for (const std::string& word :tokenChunks[i]) {
                 ++localMaps[threadId][word];
             }
         }

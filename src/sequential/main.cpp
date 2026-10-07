@@ -14,10 +14,7 @@ int main(int argc, char* argv[])
 {
     if (argc < 2) {
 
-        std::cerr
-            << "Usage: "
-            << argv[0]
-            << " <input_file>\n";
+        std::cerr<< "Usage: "<< argv[0]<< " <input_file>\n";
 
         return 1;
     }
@@ -30,11 +27,7 @@ int main(int argc, char* argv[])
 
     if (!file.is_open()) {
 
-        std::cerr
-            << "Error: Could not open file: "
-            << filename
-            << '\n';
-
+        std::cerr<< "Error: Could not open file: "<< filename<< '\n';
         return 1;
     }
 
@@ -84,11 +77,7 @@ int main(int argc, char* argv[])
 
         for (char ch : line) {
 
-            if (
-                ch == '.' ||
-                ch == '?' ||
-                ch == '!'
-            ) {
+            if (ch == '.' ||ch == '?' ||ch == '!') {
                 ++stats.totalSentences;
             }
         }
@@ -136,7 +125,7 @@ int main(int argc, char* argv[])
     // Top-K
     // -----------------------------
 
-    std::vector<WordFrequency> topWords =
+    std::vector<WordFrequency> topWords = 
         getTopK(frequency, K);
 
     // -----------------------------

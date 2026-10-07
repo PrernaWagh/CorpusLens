@@ -141,6 +141,5 @@ int main(int argc, char* argv[])
         << "Execution time  : "
         << executionTime
         << " seconds\n";
-
     return 0;
 }
