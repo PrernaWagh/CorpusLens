@@ -5,12 +5,14 @@ CXXFLAGS = -std=c++17 -O2
 OMPFLAGS = -fopenmp
 
 COMMON_SRC = \
+	src/common/corpus_reader.cpp \
 	src/common/tokenizer.cpp \
 	src/common/frequency_analyzer.cpp \
 	src/common/top_k.cpp \
 	src/common/statistics.cpp \
 	src/common/timer.cpp \
-	src/common/result_printer.cpp
+	src/common/result_printer.cpp \
+	src/common/stopwords.cpp
 
 SEQ_SRC = \
 	src/sequential/main.cpp \

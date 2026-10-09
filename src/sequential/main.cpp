@@ -1,158 +1,129 @@
 #include <iostream>
-#include <fstream>
 #include <string>
 #include <vector>
+#include <exception>
 
+#include "../common/corpus_reader.h"
 #include "../common/tokenizer.h"
 #include "../common/frequency_analyzer.h"
 #include "../common/top_k.h"
 #include "../common/statistics.h"
 #include "../common/timer.h"
 #include "../common/result_printer.h"
+#include "../common/stopwords.h"
 
-int main(int argc, char* argv[])
-{
-    if (argc < 2) {
-
-        std::cerr<< "Usage: "<< argv[0]<< " <input_file>\n";
-
+int main(int argc, char* argv[]) {
+    if (argc < 2 || argc > 3) {
+        std::cerr << "Usage: " << argv[0]
+                  << " <input_file_or_directory> [--remove-stopwords]\n";
         return 1;
     }
 
-    const std::string filename = argv[1];
+    const std::string inputPath = argv[1];
+    const bool removeStopWords =
+        argc == 3 && std::string(argv[2]) == "--remove-stopwords";
 
-    const int K = 10;
+    if (argc == 3 && !removeStopWords) {
+        std::cerr << "Unknown option: " << argv[2] << '\n';
+        return 1;
+    }
 
-    std::ifstream file(filename);
+    Timer timer;
+    timer.start();
 
-    if (!file.is_open()) {
+    std::vector<Document> documents;
 
-        std::cerr<< "Error: Could not open file: "<< filename<< '\n';
+    try {
+        documents = readCorpus(inputPath);
+    } catch (const std::exception& error) {
+        std::cerr << "Corpus error: " << error.what() << '\n';
         return 1;
     }
 
     CorpusStatistics stats;
-
     std::vector<std::string> allTokens;
+    std::vector<std::size_t> documentWordCounts;
 
-    bool insideParagraph = false;
+    for (const Document& document : documents) {
+        std::size_t documentWords = 0;
+        bool insideParagraph = false;
 
-    Timer timer;
+        for (const std::string& line : document.lines) {
+            ++stats.totalLines;
+            stats.totalCharacters += line.length();
 
-    timer.start();
-
-    std::string line;
-
-    while (std::getline(file, line)) {
-
-        // -----------------------------
-        // Line statistics
-        // -----------------------------
-
-        ++stats.totalLines;
-
-        stats.totalCharacters += line.length();
-
-        // -----------------------------
-        // Paragraph detection
-        // -----------------------------
-
-        if (line.empty()) {
-
-            if (insideParagraph) {
-
-                ++stats.totalParagraphs;
-
-                insideParagraph = false;
+            if (line.empty()) {
+                if (insideParagraph) {
+                    ++stats.totalParagraphs;
+                    insideParagraph = false;
+                }
+            } else {
+                insideParagraph = true;
             }
 
-        } else {
-
-            insideParagraph = true;
-        }
-
-        // -----------------------------
-        // Sentence detection
-        // -----------------------------
-
-        for (char ch : line) {
-
-            if (ch == '.' ||ch == '?' ||ch == '!') {
-                ++stats.totalSentences;
+            for (char ch : line) {
+                if (ch == '.' || ch == '?' || ch == '!') {
+                    ++stats.totalSentences;
+                }
             }
+
+            std::vector<std::string> tokens = tokenize(line);
+            documentWords += tokens.size();
+            stats.totalWords += tokens.size();
+
+            allTokens.insert(
+                allTokens.end(), tokens.begin(), tokens.end()
+            );
         }
 
-        // -----------------------------
-        // Tokenization
-        // -----------------------------
+        if (insideParagraph) {
+            ++stats.totalParagraphs;
+        }
 
-        std::vector<std::string> tokens =
-            tokenize(line);
-
-        stats.totalWords += tokens.size();
-
-        allTokens.insert(
-            allTokens.end(),
-            tokens.begin(),
-            tokens.end()
-        );
+        documentWordCounts.push_back(documentWords);
     }
 
-    // Last paragraph
-    if (insideParagraph) {
-        ++stats.totalParagraphs;
+    StopWordSet stopWords;
+
+    try {
+        stopWords = loadStopWords("data/stopwords.txt");
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
     }
 
-    file.close();
+    FrequencyMap frequency = countWordFrequency(
+        allTokens, &stopWords, removeStopWords
+    );
 
-    // -----------------------------
-    // Word frequency
-    // -----------------------------
-
-    FrequencyMap frequency =
-        countWordFrequency(allTokens);
-
-    stats.uniqueWords =
-        frequency.size();
-
-    // -----------------------------
-    // Calculate averages
-    // -----------------------------
-
+    stats.uniqueWords = frequency.size();
     calculateAverages(stats);
 
-    // -----------------------------
-    // Top-K
-    // -----------------------------
+    std::vector<WordFrequency> topWords = getTopK(frequency, 10);
+    double executionTime = timer.stop();
 
-    std::vector<WordFrequency> topWords = 
-        getTopK(frequency, K);
+    std::cout << "\n========== DOCUMENT SUMMARY ==========\n";
+    std::cout << "Documents processed: " << documents.size() << '\n';
 
-    // -----------------------------
-    // Stop timer
-    // -----------------------------
+    std::size_t totalDocumentWords = 0;
+    for (std::size_t i = 0; i < documents.size(); ++i) {
+        std::cout << documents[i].name << " : "
+                  << documentWordCounts[i] << " words\n";
+        totalDocumentWords += documentWordCounts[i];
+    }
 
-    double executionTime =
-        timer.stop();
+    double averageDocumentWords =
+        documents.empty() ? 0.0 :
+        static_cast<double>(totalDocumentWords) / documents.size();
 
-    // -----------------------------
-    // Print results
-    // -----------------------------
+    std::cout << "Average words per document: "
+              << averageDocumentWords << '\n';
 
     printStatistics(stats);
-
     printTopK(topWords);
 
-    std::cout
-        << "\n========================================\n";
-
-    std::cout
-        << "Execution time : "
-        << executionTime
-        << " seconds\n";
-
-    std::cout
-        << "========================================\n";
+    std::cout << "\nExecution time: "
+              << executionTime << " seconds\n";
 
     return 0;
 }

@@ -5,9 +5,10 @@ import os
 import re
 from pathlib import Path
 import pandas as pd
-# ============================================================
-# CONFIGURATION
-# ============================================================
+import io 
+import shutil
+import zipfile
+
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -692,6 +693,8 @@ def parse_output(output):
     top_words = []
 
     patterns = {
+        "documents_processed": r"Documents processed\s*:\s*(\d+)",
+        "avg_words_document": r"Average words per document\s*:\s*([\d.]+)",
         "total_lines": r"Total lines\s*:\s*([\d.]+)",
         "total_paragraphs": r"Total paragraphs\s*:\s*([\d.]+)",
         "total_words": r"Total words\s*:\s*([\d.]+)",
@@ -710,7 +713,7 @@ def parse_output(output):
         if not match:
             continue
         value = match.group(1)
-        if key in {"avg_words_line","avg_words_sentence","avg_characters_line","execution_time"}:
+        if key in {"avg_words_line","avg_words_sentence", "avg_characters_line","avg_words_document","execution_time"}:
             stats[key] = float(value)
         else:
             stats[key] = int(float(value))
@@ -729,10 +732,26 @@ def parse_output(output):
                     "Frequency": int(match.group(3))
                 })
 
+    document_word_counts = []
+
+    for line in output.splitlines():
+        match = re.match(
+            r"\s*(.+?)\s*:\s*(\d+)\s+words\s*$",
+            line
+        )
+        if match:
+            document_word_counts.append({
+                "Document": match.group(1),
+                "Words": int(match.group(2))
+            })
+
+    stats["document_word_counts"] = document_word_counts
+
     return stats, top_words
 
 
-def run_engine(input_file, mode, threads=4):
+
+def run_engine(input_file, mode, threads=4, remove_stopwords=True):
     try:
         if mode == "Sequential":
             executable = SEQUENTIAL
@@ -747,6 +766,9 @@ def run_engine(input_file, mode, threads=4):
                 f"Executable not found: {executable}\n\n"
                 "Please compile the C++ project before running CorpusLens."
             )
+
+        if remove_stopwords:
+            command.append("--remove-stopwords")
 
         result = subprocess.run(
             command,
@@ -771,23 +793,95 @@ def run_engine(input_file, mode, threads=4):
         return f"ERROR: {error}"
 
 
-def save_uploaded_file(uploaded_file):
-    suffix = Path(uploaded_file.name).suffix
-    if suffix == "":
-        suffix = ".txt"
 
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    temp_file.write(uploaded_file.getbuffer())
-    temp_file.close()
+def save_uploaded_file(uploaded_file, csv_text_column=None):
+    """
+    Prepare a corpus directory for the C++ engine.
 
-    return Path(temp_file.name)
+    TXT: one document.
+    CSV: each non-empty row in the selected text column is a document.
+    ZIP: each contained TXT file is a separate document.
+
+    Returns the temporary directory path. The caller must remove it.
+    """
+    suffix = Path(uploaded_file.name).suffix.lower()
+    temp_dir = Path(tempfile.mkdtemp(prefix="corpuslens_"))
+
+    try:
+        if suffix == ".txt":
+            destination = temp_dir / "document_001.txt"
+            destination.write_bytes(uploaded_file.getvalue())
+
+        elif suffix == ".csv":
+            if not csv_text_column:
+                raise ValueError(
+                    "Please select the CSV column containing article text."
+                )
+
+            frame = pd.read_csv(io.BytesIO(uploaded_file.getvalue()))
+
+            if csv_text_column not in frame.columns:
+                raise ValueError(
+                    f"Column '{csv_text_column}' was not found in the CSV."
+                )
+
+            count = 0
+            for value in frame[csv_text_column]:
+                if pd.isna(value):
+                    continue
+
+                text = str(value).strip()
+                if not text:
+                    continue
+
+                count += 1
+                destination = temp_dir / f"document_{count:06d}.txt"
+                destination.write_text(text, encoding="utf-8")
+
+            if count == 0:
+                raise ValueError(
+                    "The selected CSV column contains no non-empty documents."
+                )
+
+        elif suffix == ".zip":
+            count = 0
+
+            with zipfile.ZipFile(io.BytesIO(uploaded_file.getvalue())) as archive:
+                for member in archive.infolist():
+                    if member.is_dir():
+                        continue
+
+                    if Path(member.filename).suffix.lower() != ".txt":
+                        continue
+
+                    # Use a generated name to avoid path traversal and
+                    # duplicate-name issues from archive contents.
+                    content = archive.read(member)
+                    count += 1
+
+                    destination = temp_dir / f"document_{count:06d}.txt"
+                    destination.write_bytes(content)
+
+            if count == 0:
+                raise ValueError(
+                    "The ZIP archive contains no TXT documents."
+                )
+
+        else:
+            raise ValueError("Supported formats are TXT, CSV, and ZIP.")
+
+        return temp_dir
+
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
 
 
-def benchmark_uploaded_file(input_file):
+def benchmark_uploaded_file(input_file, remove_stopwords=True):
     results = []
     errors = []
 
-    sequential_output = run_engine(input_file, "Sequential")
+    sequential_output = run_engine(input_file, "Sequential", remove_stopwords=remove_stopwords)
 
     if sequential_output.startswith("ERROR"):
         errors.append("Sequential benchmark failed:\n" + sequential_output)
@@ -807,7 +901,7 @@ def benchmark_uploaded_file(input_file):
             )
 
     for thread_count in BENCHMARK_THREADS:
-        parallel_output = run_engine(input_file, "Parallel", thread_count)
+        parallel_output = run_engine(input_file, "Parallel", thread_count, remove_stopwords)
 
         if parallel_output.startswith("ERROR"):
             errors.append(
@@ -833,34 +927,22 @@ def benchmark_uploaded_file(input_file):
 
     return pd.DataFrame(results), errors
 
-def verify_correctness(input_file, thread_count):
+def verify_correctness(input_file, thread_count, remove_stopwords=True):
     """
     Compare sequential and parallel results for the same input corpus.
-
     Execution time and thread count are intentionally NOT compared.
     We compare corpus statistics and Top-K frequencies.
     """
 
-    sequential_output = run_engine(
-        input_file,
-        "Sequential"
-    )
+    sequential_output = run_engine(input_file, "Sequential", remove_stopwords=remove_stopwords)
 
     if sequential_output.startswith("ERROR"):
         return {
             "passed": False,
             "details": [],
-            "error": (
-                "Sequential execution failed:\n"
-                + sequential_output
-            )
-        }
+            "error": ("Sequential execution failed:\n"+ sequential_output)}
 
-    parallel_output = run_engine(
-        input_file,
-        "Parallel",
-        thread_count
-    )
+    parallel_output = run_engine(input_file, "Parallel", thread_count, remove_stopwords)
 
     if parallel_output.startswith("ERROR"):
         return {
@@ -1048,22 +1130,58 @@ st.sidebar.markdown(
 )
 
 uploaded_file = st.sidebar.file_uploader(
-    "Upload a text corpus",
-    type=["txt"],
+    "Upload a corpus (TXT, CSV, or ZIP)",
+    type=["txt", "csv", "zip"],
     label_visibility="collapsed"
 )
 
-if uploaded_file is not None:
-    current_signature = (uploaded_file.name, uploaded_file.size)
-    previous_signature = st.session_state.uploaded_file_signature
+csv_text_column = None
 
-    if previous_signature is not None and current_signature != previous_signature:
-        reset_results()
+if uploaded_file is not None and Path(uploaded_file.name).suffix.lower() == ".csv":
+    try:
+        csv_columns = list(
+            pd.read_csv(
+                io.BytesIO(uploaded_file.getvalue()),
+                nrows=0
+            ).columns
+        )
 
-    st.session_state.uploaded_file_signature = current_signature
+        if not csv_columns:
+            st.sidebar.error("The CSV has no columns.")
+        else:
+            preferred_columns = {
+                "article", "text", "content", "description"
+            }
 
-st.sidebar.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+            default_index = next(
+                (
+                    i for i, column in enumerate(csv_columns)
+                    if str(column).strip().lower() in preferred_columns
+                ),
+                0
+            )
 
+            csv_text_column = st.sidebar.selectbox(
+                "Column containing article text",
+                options=csv_columns,
+                index=default_index,
+                help=(
+                    "Choose the column containing the actual article "
+                    "content, not its ID or category."
+                )
+            )
+
+    except Exception as error:
+        st.sidebar.error(f"Could not read CSV headers: {error}")
+
+remove_stopwords = st.sidebar.checkbox(
+    "Remove stop words",
+    value=True,
+    help=(
+        "Enabled by default. Excludes common stop words from "
+        "unique-word counts and Top-10 frequency results."
+    )
+)
 st.sidebar.markdown(
     "<div style='font-size:0.72rem;letter-spacing:0.12em;text-transform:uppercase;"
     "color:#8a8880;margin:8px 0 6px;'>02 — Execution Mode</div>",
@@ -1259,16 +1377,12 @@ if run_analysis:
         temp_path = None
 
         try:
-            temp_path = save_uploaded_file(uploaded_file)
+            temp_path = save_uploaded_file(uploaded_file,csv_text_column)
 
             with st.spinner(
                 f"Running {mode.lower()} corpus analysis..."
             ):
-                output = run_engine(
-                    temp_path,
-                    mode,
-                    threads
-                )
+                output = run_engine(temp_path, mode, threads, remove_stopwords)
 
             if output.startswith("ERROR"):
 
@@ -1317,7 +1431,7 @@ if run_analysis:
             if temp_path is not None:
 
                 try:
-                    os.unlink(temp_path)
+                    shutil.rmtree(temp_path, ignore_errors=True)
 
                 except Exception:
                     pass
@@ -1326,7 +1440,7 @@ if run_benchmark:
 
     if uploaded_file is None:
 
-        st.warning("Please upload a .txt corpus first.")
+        st.warning("Please upload a .txt corpus or .csv dataset first.")
 
     else:
 
@@ -1334,16 +1448,17 @@ if run_benchmark:
 
         try:
 
-            temp_path = save_uploaded_file(uploaded_file)
+            temp_path = save_uploaded_file(
+    uploaded_file,
+    csv_text_column
+)
 
             with st.spinner(
                 "Running sequential baseline and OpenMP "
                 "thread-scaling benchmark..."
             ):
 
-                benchmark_df, benchmark_errors = (
-                    benchmark_uploaded_file(temp_path)
-                )
+                benchmark_df, benchmark_errors = benchmark_uploaded_file(temp_path, remove_stopwords)
 
             st.session_state.benchmark_df = benchmark_df
 
@@ -1368,7 +1483,7 @@ if run_benchmark:
             if temp_path is not None:
 
                 try:
-                    os.unlink(temp_path)
+                    shutil.rmtree(temp_path, ignore_errors=True)
 
                 except Exception:
                     pass
@@ -1389,7 +1504,10 @@ if run_correctness:
 
         try:
 
-            temp_path = save_uploaded_file(uploaded_file)
+            temp_path = save_uploaded_file(
+    uploaded_file,
+    csv_text_column
+)
 
             with st.spinner(
                 "Comparing sequential and parallel results..."
@@ -1397,7 +1515,7 @@ if run_correctness:
 
                 correctness_result = verify_correctness(
                     temp_path,
-                    threads
+                    threads, remove_stopwords
                 )
 
             st.session_state.correctness_done = True
@@ -1423,7 +1541,7 @@ if run_correctness:
             if temp_path is not None:
 
                 try:
-                    os.unlink(temp_path)
+                    shutil.rmtree(temp_path, ignore_errors=True)
 
                 except Exception:
                     pass
@@ -1491,6 +1609,36 @@ if st.session_state.analysis_done:
         )
 
         st.dataframe(additional_stats, use_container_width=True, hide_index=True)
+        
+        st.divider()
+
+        section_label("03", "Document-Level Analytics")
+
+        d1, d2 = st.columns(2, gap="medium")
+
+        d1.metric(
+            "Documents Processed",
+            f"{stats.get('documents_processed', 0):,}"
+        )
+
+        d2.metric(
+            "Average Words / Document",
+            f"{stats.get('avg_words_document', 0):.2f}"
+        )
+
+        document_df = pd.DataFrame(
+            stats.get("document_word_counts", [])
+        )
+
+        if not document_df.empty:
+            st.dataframe(
+                document_df,
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("No document-level statistics were returned.")
+
 
         st.divider()
 
@@ -1538,10 +1686,24 @@ if st.session_state.analysis_done:
                     "Frequency Distribution</div>",
                     unsafe_allow_html=True
                 )
-                chart_data = top_df.set_index("Word")["Frequency"]
-                st.bar_chart(chart_data, use_container_width=True)
+                import matplotlib.pyplot as plt
 
-            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+                fig, ax = plt.subplots(figsize=(10, 5))
+
+                ax.bar(
+                top_df["Word"],
+                top_df["Frequency"]
+                )
+
+                ax.set_xlabel("Words")
+                ax.set_ylabel("Frequency")
+                ax.set_title("Frequency Distribution")
+
+                plt.xticks(rotation=45, ha="right") 
+
+                st.pyplot(fig, use_container_width=True)
+
+                st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
             st.download_button(
                 "Download Word Frequencies",

@@ -5,10 +5,15 @@
 #include <vector>
 #include <unordered_map>
 
-using FrequencyMap = std::unordered_map<std::string, long long>;
+#include "stopwords.h"
+
+using FrequencyMap =
+    std::unordered_map<std::string, long long>;
 
 FrequencyMap countWordFrequency(
-    const std::vector<std::string>& tokens
+    const std::vector<std::string>& tokens,
+    const StopWordSet* stopWords = nullptr,
+    bool removeStopWords = false
 );
 
 #endif
